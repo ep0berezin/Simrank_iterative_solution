@@ -63,5 +63,5 @@ def main_process(args):
 	
 
 if __name__=="__main__":
-	args = [1e-5,15, 1, 0.5, 8, 1000000000, "eumail", 0.8,  ["SimpleIter", "SimpleIter_SVD"]] #default args
+	args = [1e-5,15, 1, 0.5, 8, 1000000000, "eumail", 0.8,  ["GMRES", "GMRES_SVD"]] #default args
 	main_process(args)

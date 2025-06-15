@@ -27,7 +27,9 @@ class G_operator:
 		return G
 
 class G_svd_operator:
-	def __init__(self, A, c, sparse_svd_factors = False, svd_trs=1e-5, r_coef=10.0):
+	def __init__(self, A, c, sparse_svd_factors = False, svd_trs=1e-5, r_coef=2.0):
+		#about r_coef. Analytically, r_coef must be 1/2, but 4.0 works fine and gives speedup, __in case of eumail__. 
+		#Ofc because operator singvals and singvecs contains small values that are being thresholded but ...
 		self.n = A.shape[1]
 		nnz = A.nnz
 		print(f"A shape: {A.shape}, nnz: {nnz}")
@@ -40,7 +42,7 @@ class G_svd_operator:
 		U, s, V = np.linalg.svd(A.toarray(), full_matrices = False)
 		self.W_r = U[:,:r]@np.diag(s[:r])
 		self.W_r_T = self.W_r.T
-		self.V_r = V[:r]
+		self.V_r = V[:r,:]
 		self.V_r_T = self.V_r.T
 		
 		if sparse_svd_factors:
@@ -73,8 +75,8 @@ class G_svd_operator:
 			print("Transformed.")
 	def __call__(self, x):
 		X = x.reshape((self.n, self.n), order = 'F')
-		Factor1 = self.c*(self.V_r_T@(self.W_r_T@X)) # 2rn^2
-		T_1 = ((Factor1@self.W_r)@self.V_r) # 2rn^2 totally 4 rn^2
+		T_0 = self.V_r_T@(self.W_r_T@X) # 2rn^2
+		T_1 = (T_0@self.W_r)@self.V_r # 2rn^2 totally 4 rn^2
 		np.fill_diagonal(T_1, 0.0) #A.TUA - diag(A.TUA)
 		G = X - self.c*T_1
 		G = G.reshape((self.n**2,1), order = 'F')
@@ -218,7 +220,7 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 		if (solver == "SimpleIter_SVD"): #simple iter with adjacency matrix as sparse SVD.
 			notfound = False
 			print(f"Starting SimpleIterSVD with {k_iter_max} iterations limit tau =  {tau} iter parameter ..")
-			G = G_svd_operator(A_csr, c) #Initialize operator
+			G = G_svd_operator(A_csr, c, sparse_svd_factors = True) #Initialize operator
 			ts = time.time()
 			s_si_svd, solutiondata = slv.SimpleIter(G, tau, s_0, b, k_iter_max, acc)
 			ts = time.time() - ts
@@ -272,7 +274,7 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 		if (solver == "GMRES_SVD"):
 			notfound = False
 			print(f"Starting GMRES_SVD with {k_iter_max} iterations limit and {m_Krylov} max Krylov subspace dimensionality ..")
-			G = G_svd_operator(A_csr, c) #Initialize operator
+			G = G_svd_operator(A_csr, c, sparse_svd_factors = True) #Initialize operator
 			ts = time.time()
 			s_gmres_svd, solutiondata = slv.GMRES_m(G, m_Krylov, s_0, b, k_iter_max, acc)
 			ts = time.time() - ts
