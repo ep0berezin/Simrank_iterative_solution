@@ -4,6 +4,7 @@ import sys
 import time
 import matplotlib.pyplot as plt 
 import datetime as dt
+import pandas as pd
 from matplotlib.ticker import FixedLocator, FixedFormatter
 from memory_profiler import profile
 import solvers as slv
@@ -26,7 +27,7 @@ class G_operator:
 		G = G.reshape((self.n**2,1), order = 'F')
 		return G
 
-class G_svd_operator:
+class G_svd_operator__: #without Sm4rt thr3sh0ld1ng
 	def __init__(self, A, c, sparse_svd_factors = False, svd_trs=1e-5, r_coef=2.0):
 		#about r_coef. Analytically, r_coef must be 1/2, but 4.0 works fine and gives speedup, __in case of eumail__. 
 		#Ofc because operator singvals and singvecs contains small values that are being thresholded but ...
@@ -40,38 +41,111 @@ class G_svd_operator:
 		print(f"Truncating rank: {r}")
 		print("SVD of adjacency matrix...")
 		U, s, V = np.linalg.svd(A.toarray(), full_matrices = False)
-		self.W_r = U[:,:r]@np.diag(s[:r])
-		self.W_r_T = self.W_r.T
-		self.V_r = V[:r,:]
-		self.V_r_T = self.V_r.T
+		W_r = U[:,:r]@np.diag(s[:r])
+		W_r_T = W_r.T
+		V_r = V[:r,:]
+		V_r_T = V_r.T
 		
 		if sparse_svd_factors:
 			print("Completed. Thresholding...")
-			for i in range(U.shape[0]):
-				for j in range(U.shape[1]):
-					if (np.abs(U[i,j])<svd_trs):
-						U[i,j] = 0
-			for i in range(V.shape[0]):
-				for j in range(V.shape[1]):
-					if (np.abs(V[i,j])<svd_trs):
-						V[i,j] = 0
-			for i in range(s.shape[0]): #not sure it is needed since we truncate by rank anyway; but maybe it can sometimes cut low singular vals.
-				if (np.abs(s[i])<svd_trs):
-						s[i] = 0
+			for i in range(W_r.shape[0]):
+				for j in range(W_r.shape[1]):
+					if (np.abs(W_r[i,j])<svd_trs):
+						W_r[i,j] = 0
+			for i in range(V_r.shape[0]):
+				for j in range(V_r.shape[1]):
+					if (np.abs(V_r[i,j])<svd_trs):
+						V_r[i,j] = 0
 			print("Thresholding completed.")
 			print("U: ")
 			print(U)
 			print("sigma: ")
 			print(s)
 			print("Transforming to csr...")
-			W_r = U[:,:r]@np.diag(s[:r])
 			self.W_r = csr_matrix(W_r)
+			self.V_r = csr_matrix(V_r)
 			print(f"SVD factors sparsity defined as sparsity = 1 - nnz/(dim1*dim2):")
 			print(f"W = U@Sigma sparsity: {1 - self.W_r.nnz/(self.W_r.shape[0]*self.W_r.shape[1])}")
-			self.V_r = csr_matrix(V[:r])
 			print(f"V sparsity: {1 - self.V_r.nnz/(self.V_r.shape[0]*self.V_r.shape[1])}")
 			self.W_r_T = csr_matrix(W_r.T)
-			self.V_r_T = csr_matrix(V[:r].T)
+			self.V_r_T = csr_matrix(V_r.T)
+			print("Transformed.")
+	def __call__(self, x):
+		X = x.reshape((self.n, self.n), order = 'F')
+		T_0 = self.V_r_T@(self.W_r_T@X) # 2rn^2
+		T_1 = (T_0@self.W_r)@self.V_r # 2rn^2 totally 4 rn^2
+		np.fill_diagonal(T_1, 0.0) #A.TUA - diag(A.TUA)
+		G = X - self.c*T_1
+		G = G.reshape((self.n**2,1), order = 'F')
+		return G
+
+class G_svd_operator: #with Sm4rt tr3sh0ld1ng
+	def __init__(self, A, c, sparse_svd_factors = False, svd_trs=1e-5, r_coef=2.0, trsnorm = 2):
+		#about r_coef. Analytically, r_coef must be 1/2, but 4.0 works fine and gives speedup, __in case of eumail__. 
+		#Ofc because operator singvals and singvecs contains small values that are being thresholded but ...
+		self.n = A.shape[1]
+		nnz = A.nnz
+		print(f"A shape: {A.shape}, nnz: {nnz}")
+		if (self.n!=A.shape[0]):
+			print(f"Warning! Non-square adjacency matrix detected when constructing operator.")
+		self.c = c
+		r = int( (nnz/self.n)*r_coef ) #obtained from condition: 4rn^2 < 2 n_{nnz}*n -- condition of SVD-version efficiency relatively to CSR-version.
+		print(f"Truncating rank: {r}")
+		print("SVD of adjacency matrix...")
+		U, s, V = np.linalg.svd(A.toarray(), full_matrices = False)
+		W_r = U[:,:r]@np.diag(s[:r])
+		V_r = V[:r,:]
+		V_r_T = V_r.T
+		W_r_T = W_r.T
+		if sparse_svd_factors:
+			print("Completed. Thresholding...") 
+			#ToDo: normalize thresholds amd multiply by coef. Also, for 0-cols/rows threshold must just be maximum allowed.
+			#Thus, thresholds are normalized from max allowed to 0.
+			trs_col = np.empty(self.n)
+			trs_row = np.empty(self.n)
+			for i in range(self.n):
+				colnorm = np.linalg.norm(A[:,i].toarray(), ord = trsnorm)
+				colnorm = colnorm if (colnorm > 0.0) else 1.0
+				rownorm = np.linalg.norm(A[i,:].toarray(), ord = trsnorm)
+				rownorm = rownorm if (rownorm > 0.0) else 1.0
+				trs_col[i] = colnorm
+				trs_row[i] = rownorm
+			trs_col = trs_col/np.linalg.norm(trs_col, ord = trsnorm)
+			trs_col = trs_col*(svd_trs/np.max(np.abs(trs_col)))
+			trs_row = trs_row/np.linalg.norm(trs_row, ord = trsnorm)
+			trs_row = trs_row*(svd_trs/np.max(np.abs(trs_row)))
+			print("Thresholds:")
+			print(f"Cols: {trs_col}")
+			print(f"Max threshold in cols: {np.max(np.abs(trs_col))}")
+			print(f"Min threshold in cols: {np.min(np.abs(trs_col))}")
+			print(f"Rows: {trs_row}")
+			print(f"Max threshold in rows: {np.max(np.abs(trs_row))}")
+			print(f"Min threshold in rows: {np.min(np.abs(trs_row))}")
+			#thresholds used as follows: 
+			#j-th column of A is obtained as (all rows of W) @ (j-th column of V)
+			#u-th row of A is obtained as (i-th row of W) @ (all columns of V)
+			#thus, trs_col thresholds V columns and trs_row thresholds W rows
+			for i in range(V_r.shape[0]):
+				for j in range(V_r.shape[1]):
+					if (np.abs(V_r[i,j]) < trs_col[j]):
+						V_r[i,j] = 0.0
+			for i in range(W_r.shape[0]):
+				for j in range(W_r.shape[1]):
+					if (np.abs(W_r[i,j]) < trs_row[i]):
+						W_r[i,j] = 0.0
+			print("Thresholding completed.")
+			print("U: ")
+			print(U)
+			print("sigma: ")
+			print(s)
+			print("Transforming to csr...")
+			self.W_r = csr_matrix(W_r)
+			self.V_r = csr_matrix(V_r)
+			print(f"SVD factors sparsity defined as sparsity = 1 - nnz/(dim1*dim2):")
+			print(f"W = U@Sigma sparsity: {1 - self.W_r.nnz/(self.W_r.shape[0]*self.W_r.shape[1])}")
+			print(f"V sparsity: {1 - self.V_r.nnz/(self.V_r.shape[0]*self.V_r.shape[1])}")
+			self.W_r_T = csr_matrix(W_r.T)
+			self.V_r_T = csr_matrix(V_r.T)
 			print("Transformed.")
 	def __call__(self, x):
 		X = x.reshape((self.n, self.n), order = 'F')
@@ -111,35 +185,42 @@ class F_M_operator: #for RSVD iterations.
 			MOmega[:,i] = t_2 - self.c*d + self.B@w
 		return MOmega
 	
-def plot(solvername, taskname, solutiondata, acc):
+def plot(solvername, taskname, solutiondata, acc, c, wtf=True):
+	dateformat = "%Y_%m_%d-%H-%M-%S" #for log and plots saving
 	res_graph = plt.plot(solutiondata[0], solutiondata[1])
 	plt.yscale('log')
 	plt.xlabel(r'Итерация', fontsize = 12) 
 	plt.ylabel(r'Относительная невязка', fontsize = 12)
+	
+	if wtf:
+		df = pd.DataFrame({'residuals': solutiondata[1], 'iterations': solutiondata[0]})
+		df.to_csv("results/data/results_"+solvername+"_"+taskname+"_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat))+".csv", index=False)
 
 def writelog(c, taskname, t, acc, dateformat):
-	filename = ("results/log_"+taskname+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".csv")
+	filename = ("results/log/log_"+taskname+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".csv")
 	with open(filename, 'a+') as f:
 		f.write(f"{c},{taskname},")
 		for key in t:
 			f.write(f"{key},{t[key]},")
 
-def maxerr(S): #S - dict of solutions
-	err = 0.0
+def err(S, n): #S - dict of solutions ###rework to make output like : d = {"gmres-gmres_svd" : [max_err, avg_err, fro_err]}
+	max_err = 0.0
 	err_tmp = 0.0
+	err_sum = 0.0
 	for key1 in S:
 		for key2 in S:
 			if (key1!=key2):
+
 				plt.figure()
 				graph_err = plt.imshow(np.abs(S[key1]-S[key2])) #errors portrait
 				cbar = plt.colorbar()
 				cbar.set_label("abs error")
 				plt.title(f"Портрет ошибки {str(key1)} - {str(key2)}", fontweight = "bold")
-			err_tmp = np.max(np.abs(S[key1]-S[key2]))
-			if (err_tmp > err):
-				err = err_tmp
-
-	return err
+				err_tmp = np.max(np.abs(S[key1]-S[key2]))
+				err_sum += np.sum(np.abs(S[key1]-S[key2]))
+			if (err_tmp > max_err):
+				max_err = err_tmp
+	return max_err, err_sum/(n*n)
 
 def RSVDIters(A, c, r, p, k_max_iter, eps): #RSVD iterations.
 	n = A.shape[0]
@@ -203,7 +284,7 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 			s_si, solutiondata = slv.SimpleIter(G, tau, s_0, b, k_iter_max, acc)
 			ts = time.time() - ts
 			S_si = s_si.reshape((n,n), order = 'F')
-			plot(solver, taskname, solutiondata, acc)
+			plot(solver, taskname, solutiondata, acc, c)
 			S["S_si"] = S_si
 			t["S_si"] = ts
 		if (solver == "SimpleIter_TEST"): #test SI with SVD for adjustable max iter
@@ -214,7 +295,7 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 			s_si_TEST, solutiondata = slv.SimpleIter(G, tau, s_0, b, 77, acc)
 			ts = time.time() - ts
 			S_si_TEST = s_si_TEST.reshape((n,n), order = 'F')
-			plot(solver, taskname, solutiondata, acc)
+			plot(solver, taskname, solutiondata, acc, c)
 			S["S_si_TEST"] = S_si_TEST
 			t["S_si_TEST"] = ts
 		if (solver == "SimpleIter_SVD"): #simple iter with adjacency matrix as sparse SVD.
@@ -225,7 +306,7 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 			s_si_svd, solutiondata = slv.SimpleIter(G, tau, s_0, b, k_iter_max, acc)
 			ts = time.time() - ts
 			S_si_svd = s_si_svd.reshape((n,n), order = 'F')
-			plot(solver, taskname, solutiondata, acc)
+			plot(solver, taskname, solutiondata, acc, c)
 			S["S_si_svd"] = S_si_svd
 			t["S_si_svd"] = ts
 		if (solver == "RSVDIters"):
@@ -234,7 +315,7 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 			ts = time.time()
 			M_rsvd, solutiondata =  RSVDIters(A, c, r, p, k_iter_max, acc*1e4) #1e-5 too slow.
 			ts = time.time() - ts
-			plot(solver, taskname, solutiondata, acc)
+			plot(solver, taskname, solutiondata, acc, c)
 			S["S_rsvd"] = M_rsvd + I
 			t["S_rsvd"] = ts
 		###NX
@@ -268,7 +349,7 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 			s_gmres, solutiondata = slv.GMRES_m(G, m_Krylov, s_0, b, k_iter_max, acc)
 			ts = time.time() - ts
 			S_gmres = s_gmres.reshape((n,n), order = 'F')
-			plot(solver, taskname, solutiondata, acc)
+			plot(solver, taskname, solutiondata, acc, c)
 			S["S_gmres"] = S_gmres
 			t["S_gmres"] = ts
 		if (solver == "GMRES_SVD"):
@@ -279,7 +360,7 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 			s_gmres_svd, solutiondata = slv.GMRES_m(G, m_Krylov, s_0, b, k_iter_max, acc)
 			ts = time.time() - ts
 			S_gmres_svd = s_gmres_svd.reshape((n,n), order = 'F')
-			plot(solver, taskname, solutiondata, acc)
+			plot(solver, taskname, solutiondata, acc, c)
 			S["S_gmres_svd"] = S_gmres_svd
 			t["S_gmres_svd"] = ts
 		if (solver == "GMRES_scipy"):
@@ -290,24 +371,27 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 			s_gmres_scipy, solutiondata = slv.GMRES_scipy(G, m_Krylov, s_0, b, k_iter_max, acc)
 			S_gmres_scipy = s_gmres_scipy.reshape((n,n), order = 'F')
 			ts = time.time() - ts
-			plot(solver, taskname, solutiondata, acc)
+			plot(solver, taskname, solutiondata, acc, c)
 			S["S_gmres_scipy"] = S_gmres_scipy
 			t["S_gmres_scipy"] = ts
 		if (solver == "MinRes"):
 			notfound = False
 			print(f"Starting MinRes with {k_iter_max} iterations limit  ...")
 			S_minres = 0#placeholder
-			plot(solver, taskname, solutiondata, acc)
+			plot(solver, taskname, solutiondata, acc, c)
 			S["S_minres"] = S_minres
 		if notfound:
 			print("Solver not found.")
 			return 1
-	plt.savefig("results/vis_"+taskname+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
+	plt.savefig("results/img/vis_"+taskname+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
 	writelog(c, taskname, t, acc, dateformat)
 	thresholds = [0.2, 0.5]
+	max_err, avg_err = err(S, n)
 	print("Max err:")
-	print(maxerr(S))
-	for key in S:
+	print(max_err)
+	print("Avg err:")
+	print(avg_err)
+	for key in S: #iterating over solutions
 		print(key)
 		print(S[key])
 		print(f"Time of {key}: ", t[key])
@@ -317,7 +401,7 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 		cbar.set_label("ln(S[i,j])")
 		plt.title(taskname)
 		plt.title(f"Матрица S, логарифмическая шкала, метод: {str(key)}", fontweight = "bold")
-		plt.savefig("results/imshow_ln_"+taskname+"_"+str(key)+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
+		plt.savefig("results/img/imshow_ln_"+taskname+"_"+str(key)+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
 		
 		plt.figure()
 		graph = plt.imshow(S[key]-I)
@@ -325,19 +409,19 @@ def Solve(acc, m_Krylov, tau, r_factor_rsvd, p, k_iter_max, taskname, A, c, solv
 		cbar.set_label("(S[i,j])")
 		plt.title(taskname)
 		plt.title(f"Матрица S, метод: {str(key)}", fontweight = "bold")
-		plt.savefig("results/imshow_"+taskname+"_"+str(key)+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
-		for trs in thresholds:
+		plt.savefig("results/img/imshow_"+taskname+"_"+str(key)+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
+		for trs in thresholds: #printing thresholded matrices
 			plt.figure()
 			plt.grid()
 			graph = plt.imshow(np.where((S[key]-I)>=trs, 1.0, 0.0), cmap = "binary")
 			x_dots, y_dots = np.where((S[key]-I)>=trs)
 			vals = S[key][y_dots, x_dots]
-			plt.scatter(x_dots, y_dots, c = vals, cmap = "viridis")
+			plt.scatter(x_dots, y_dots, c = vals, cmap = "viridis", s=5)
 			cbar = plt.colorbar()
 			cbar.set_label("(S[i,j])")
 			plt.title(taskname)
 			plt.title(f"Матрица S, метод: {str(key)}, порог: {str(trs)}", fontweight = "bold")
-			plt.savefig("results/imshow_top_"+str(trs)+"_"+taskname+"_"+str(key)+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
+			plt.savefig("results/img/imshow_top_"+str(trs)+"_"+taskname+"_"+str(key)+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
 	plt.show()
 	return S
 
