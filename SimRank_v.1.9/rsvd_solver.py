@@ -1,0 +1,83 @@
+import numpy as np
+
+
+
+class F_M_operator: #for RSVD iterations.
+	def __init__(self, A, c):
+		self.A = A
+		self.n = self.A.shape[1]
+		if (self.n!=self.A.shape[0]):
+			print(f"Warning! Non-square adjacency matrix detected when constructing operator.")
+		self.c = c
+		B = c*(A.T@A) #I to auto-convert to dense matrix to use fill then.
+		np.fill_diagonal(B, 0.0)
+		self.B = B
+	def __call__(self,M):
+		T_1 = self.c*(self.A.T@M@self.A)
+		np.fill_diagonal(T_1, 0.0)
+		return T_1+self.B
+	def randomize(self, U_hat, r, p): #U_hat = eigvecs matrix U multiplied by sqrt(Sigma), r = target rank, p = oversampling parameter
+		Omega = np.random.standard_normal((self.n, r+p))
+		MOmega = np.empty((self.n, r+p))
+		d = np.empty(self.n) #reserving diagonal vector
+		T_1 = U_hat.T@self.A #U_hat.T@A
+		T_2 = T_1.T
+		for i in range(r+p):
+			w = Omega[:,i]
+			t_1 = T_1@w #chain of matvecs
+			t_2 = (T_2@t_1)*self.c
+			for q in range(self.n): #optimal diag using symmetric nature of (U.T@A).T @ (U.T@A)
+				d[q] = np.dot(T_1[:,q],T_1[:,q])*w[q]
+			MOmega[:,i] = t_2 - self.c*d + self.B@w
+		return MOmega
+
+class F_utudiag_operator:
+	def __init__(self, A, c, r=800): #r = approx rank
+		self.A = A
+		self.n = self.A.shape[1]
+		if (self.n!=self.A.shape[0]):
+			print(f"Warning! Non-square adjacency matrix detected when constructing operator.")
+		self.c = c
+		self.r = r
+	def __call__(self, u): 
+		U = u.reshape((self.r, self.n), order = 'F')
+		I = np.eye(self.n)
+		UTU = U.T@U 
+		print(f"U.TU shape = {UTU.shape}") ###
+		UTU_diag = np.diag(UTU)
+		np.fill_diagonal(UTU, 0.0)
+		T_2 = self.c*(self.A.T@UTU@self.A)
+		T_3 = self.c*(self.A.T@np.diag(UTU_diag)@self.A)
+		T_4 = self.c*np.diag(np.diag(self.A.T@(UTU+I)@self.A))
+		F = UTU-T_2+T_3+T_4
+		print(f"F shape = {F.shape}")
+		return F.reshape((self.n**2,1), order = 'F')
+
+def RSVDIters(A, c, r, p, k_max_iter, eps): #RSVD iterations based on Oseledets article
+	n = A.shape[0]
+	iterdata = slv.iterations_data()
+	F_M = F_M_operator(A,c) #init operator
+	st = time.time()
+	M_0 = np.zeros((n,n))
+	M_prev = F_M(M_0) #obtain M_1 = B
+	U, sigma, V = np.linalg.svd(M_prev, full_matrices = False)
+	U_hat = U*np.sqrt(sigma) #Get U_hat = U@sqrt(Sigma); store this way to effectively compute diag()*w_i.
+	
+	for k in range(k_max_iter):
+		MOmega = F_M.randomize(U_hat, r, p) #effective multiplication by Omega
+		Q, R = np.linalg.qr(MOmega) #QR decompo
+		t_QTM = Q.T@M_prev #obtain Q^T @ M
+		M_r = Q@t_QTM #M_r
+		U_0, sigma, V = np.linalg.svd(t_QTM, full_matrices = False) #small SVD
+		U = (Q@U_0)[:,:r] #get U and truncate to r
+		U_hat = U*np.sqrt(sigma[:r]) #saving U_hat
+		relres = np.linalg.norm((M_r-M_prev), ord = 'fro')/np.linalg.norm((M_prev), ord = 'fro')
+		iterdata(relres)
+		if (relres < eps):
+			break
+		M_prev = M_r
+	et = time.time()
+	elapsed = et - st
+	print(f"Elapsed: {elapsed} s")
+	solutiondata = [iterdata.iterations, iterdata.residuals, elapsed]
+	return M_prev, solutiondata

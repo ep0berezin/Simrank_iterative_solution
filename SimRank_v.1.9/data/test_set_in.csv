@@ -1,0 +1,6 @@
+id,Name,Connections
+1,Univ,4
+2,ProfA,1
+3,ProfB,1 5
+4,StudentA,2
+5,StudentB,3
