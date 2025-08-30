@@ -93,20 +93,26 @@ def inverse_matvec(LinOp, x, m_Krylov, restarts, solver, eps=1e-10, printout=Tru
 	if printout : print(f"Finished inverse matvec for {time.time()-st} s.")
 	return u
 
-def Newton(A, c, r, maxiter, gmres_restarts, m_Krylov, solver, printout = True):
+def Newton(A, c, r, maxiter, gmres_restarts, m_Krylov, solver, stagstop = 1e-5, printout = True):
 	iterdata = iterations_data()
 	n, _ = A.shape
 	np.random.seed(42)
 	U = np.random.randn(n,r)
 	sops = simrank_ops(A, c, r)
+	f_val_prev = sops.f(U@U.T)
 	st = time.time()
 	for k in range(maxiter):
-		iterdata(sops.f(U@U.T))
 		dgradf_vec = lambda X : sops.dgradf_vectorized(U, X)
-		U = U - inverse_matvec(dgradf_vec, sops.gradf(U), m_Krylov, gmres_restarts, solver, printout=True).reshape((n,r), order = 'F')
+		U = U - inverse_matvec(dgradf_vec, sops.gradf(U), m_Krylov, gmres_restarts, solver, printout=False).reshape((n,r), order = 'F')
+		f_val = sops.f(U@U.T)
+		iterdata(f_val)
+		if (np.abs(f_val - f_val_prev)) < stagstop:
+			print(f"Stopped by f(U) stagnation (| f - f_prev | < {stagstop})")
+			break
+		f_val_prev = f_val
 	elapsed = time.time()-st
 	solutiondata = [iterdata.iterations, iterdata.funcvals, elapsed]
-	return np.eye(n) + sops.off(U@U.T), solutiondata 
+	return np.eye(n) + sops.off(U@U.T), solutiondata
 #---
 
 #--- Gradient method with step splitting---

@@ -1,7 +1,5 @@
 import numpy as np
 
-
-
 class F_M_operator: #for RSVD iterations.
 	def __init__(self, A, c):
 		self.A = A
@@ -30,28 +28,6 @@ class F_M_operator: #for RSVD iterations.
 				d[q] = np.dot(T_1[:,q],T_1[:,q])*w[q]
 			MOmega[:,i] = t_2 - self.c*d + self.B@w
 		return MOmega
-
-class F_utudiag_operator:
-	def __init__(self, A, c, r=800): #r = approx rank
-		self.A = A
-		self.n = self.A.shape[1]
-		if (self.n!=self.A.shape[0]):
-			print(f"Warning! Non-square adjacency matrix detected when constructing operator.")
-		self.c = c
-		self.r = r
-	def __call__(self, u): 
-		U = u.reshape((self.r, self.n), order = 'F')
-		I = np.eye(self.n)
-		UTU = U.T@U 
-		print(f"U.TU shape = {UTU.shape}") ###
-		UTU_diag = np.diag(UTU)
-		np.fill_diagonal(UTU, 0.0)
-		T_2 = self.c*(self.A.T@UTU@self.A)
-		T_3 = self.c*(self.A.T@np.diag(UTU_diag)@self.A)
-		T_4 = self.c*np.diag(np.diag(self.A.T@(UTU+I)@self.A))
-		F = UTU-T_2+T_3+T_4
-		print(f"F shape = {F.shape}")
-		return F.reshape((self.n**2,1), order = 'F')
 
 def RSVDIters(A, c, r, p, k_max_iter, eps): #RSVD iterations based on Oseledets article
 	n = A.shape[0]

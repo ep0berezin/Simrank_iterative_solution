@@ -4,7 +4,6 @@ from scipy.sparse import csr_matrix
 import scipy.sparse as scsp
 import sys
 import time
-from memory_profiler import profile
 
 
 class iterations_data:
@@ -210,16 +209,15 @@ class simrank_ops:
 		return Y@Vt.T-self.c*( (self.A@self.off(Y))@(self.A.T@Vt.T) )
 
 def ALS(U, V, A, c, dir_maxit, printout): #Alternating least squares solver
+	#NOTE: computation of pinv as (A.TA)^-1 A.T is faster but numerically unstable
 	simrank_operators = simrank_ops(A, c)
 	F = simrank_operators.F_UV
 	for iter_v in range(dir_maxit):
 		if printout: print(f"V direction iteration {iter_v}")
-		#V = (np.linalg.lstsq(U, F(U,V), rcond= None)[0] ).T
 		V = ( np.linalg.pinv(U)@F(U,V) ).T
 		#V = ( ( np.linalg.inv(U.T@U) )@U.T@F(U,V) ).T
 	for iter_u in range(dir_maxit):
 		if printout: print(f"U direction iteration {iter_u}")
-		#U = np.linalg.lstsq(V, F(U,V).T, rcond = None)[0].T
 		U = F(U,V)@np.linalg.pinv(V.T)
 		#U = F(U,V)@( V@np.linalg.inv(V.T@V) )
 	return U,V
@@ -277,204 +275,3 @@ def AltOpt(A, c, r, solver, maxiter=100, dir_maxit=100, eps_fro = 1e-15, eps_che
 	print(f"Elapsed {elapsed}")
 	solutiondata = [iterdata.iterations, iterdata.residuals, elapsed]
 	return np.eye(n)+U@V.T, solutiondata
-
-#---Khranilische khlama a.k.a Crap storage---
-'''
-
-class F_operator:
-	def __init__(self, A, c):
-		self.A = A
-		self.n = A.shape[1]
-		self.c = c
-	def __call__(self, U):
-		UA = U@self.A
-		T_1 = self.c*(UA).T@UA
-		np.fill_diagonal(T_1, 0.0) #cA.T@U.T@U@A - c diag
-		T_2 = self.c*self.A.T@self.A
-		np.fill_diagonal(T_2, 0.0) #cA.T@A - c diag
-		res = T_1+T_2 - U.T@U
-		return [res, UA] #UA needed to use it in grad(f) calculation.
-class normal_op_vec:
-	def __init__(self, X, d1, d2):
-		self.XTX = X.T@X
-		self.d1, self.d2 = d1, d2
-	def __call__(self, vec):
-		return (self.XTX@vec.reshape((self.d2,self.d1), order = 'F')).reshape((self.d2*self.d1,1), order = 'F')
-
-def AGMRES(F, U, V, maxiter, printout, eps=1e-13): #alternating gmres
-	n, r = U.shape
-	VTV_op = normal_op_vec(V, n, r)
-	uT, _ = GMRES_m(VTV_op, 15, U.reshape((n*r,1), order = 'F'), (V.T@(F(U,V).T)).reshape((r*n,1), order = 'F'), maxiter, eps)
-	U = uT.reshape((r, n), order = 'F').T
-	UTU_op = normal_op_vec(U, n, r)
-	vT, _ = GMRES_m(UTU_op, 15, V.reshape((n*r,1), order = 'F'), (U.T@F(U,V)).reshape((r*n,1), order = 'F'), maxiter, eps)
-	V = vT.reshape((r, n), order = 'F').T
-	return U,V
-	
-	
-class F_diag_operator:
-	def __init__(self, A, c):
-		self.c = c
-		self.A = A
-		self.n = A.shape[1]
-		self.ATA = A.T@A
-	def off(self, A):
-		np.fill_diagonal(A, 0.0)
-		return A
-	def __call__(self, U,V):
-		res = self.c*self.off(self.ATA)+self.c*self.off((self.A.T@U)@(V.T@self.A)-self.A.T@np.diag(np.diag(U@V.T))@self.A)+np.diag(np.diag(U@V.T))
-		return res
-
-
-def Oddsolver_AGMRES(A, c, r, maxiter, dir_maxit=10, eps_fro = 1e-5, eps_cheb = 1e-2, printout = True):
-	F = F_operator(A, c)
-	iterdata = iterations_data()
-	n = A.shape[1]
-	np.random.seed(42)
-	U = np.random.randn(n,r)
-	V = np.random.randn(n,r)
-	st = time.time()
-	err_fro = (np.linalg.norm(U@V.T, ord = 'fro')) #initial iteration
-	iterdata(err_fro)
-	for k in range(maxiter):
-		if printout: print(f"General iteration {k}")
-		V_prev = V
-		U_prev = U
-		U, V = AGMRES(F, U, V, printout=printout)
-		diff =U@V.T - U_prev@V_prev.T
-		err_fro = (np.linalg.norm(diff, ord = 'fro'))
-		iterdata(err_fro)
-		if  err_fro < eps_fro:
-			if printout: print("Converged by err Fro")
-			break
-		if np.max(np.abs(diff)) < eps_cheb:
-			if printout: print("Converged by err Cheb")
-			break
-	elapsed = time.time() - st
-	solutiondata = [iterdata.iterations, iterdata.residuals, elapsed]
-	return np.eye(n)+U@V.T, solutiondata
-
-#---Optimization Newton---
-#Solves grad(f) = 0 where f = ||F(U)||_F^2, F(U) = cA.T@U.T@A - c diag(A.T@U.T@U@A) +cA.T@A-c diag(A.T@A) - U.T@U
-
-def dF_du(F_U, U, UA, A, c):
-	#F_U precalulated
-	n = A.shape[1]
-	dFdu = np.zeros((n,n))
-	#F_U, UA = F(U)
-	delta = lambda i, j : 1.0 if (i==j) else 0.0
-	tmp = 0.
-	for p in range(n):
-		for q in range(n):
-			for i in range(n):
-				for j in range(n):
-					tmp += F_U[i,j]*( c*(1-delta(i,j))*(A[q,i]*UA[p,j]+A[q,j]*UA[p,i]) - (delta(i,q)*U[p,j] + delta(j,q)*U[p,i]) )
-			dFdu[p,q] = tmp
-	return dFdu
-
-def grad_f(F_U, A, dFdu, c):
-	#F_U precalulated
-	n = A.shape[1]
-	nabla_f = np.zeros((n,n))
-	#F_U, UA = F(U)
-	delta = lambda i, j : 1.0 if (i==j) else 0.0
-	tmp = 0.
-	for p in range(n):
-		for q in range(n):
-			for i in range(n):
-				for j in range(n):
-					#tmp += F_U[i,j]*( c*(1-delta(i,j))*(A[q,i]*UA[p,j]+A[q,j]*UA[p,i]) - (delta(i,q)*U[p,j] + delta(j,q)*U[p,i]) )
-					tmp += F_U[i,j]*dFdu[p,q]
-			nabla_f[p,q] = 2.*tmp
-	return nabla_f #1d array filled with df/du_pq
-
-def Jacobian(F_U, A, dFdu, c):
-	n = A.shape[1]
-	N = n**2
-	J = np.zeros((N,N))
-	tmp = 0.
-	delta = lambda i, j : 1.0 if (i==j) else 0.0
-	for p in range(n):
-		for q in range(n):
-			for alpha in range(n):
-				for beta in range(n):
-					for i in range(n):
-						for j in range(n):
-							tmp += dFdu[alpha,beta]*dFdu[p,q]+F_U[i,j]*c*(A[q,i]*A[beta,j]+A[q,j]*A[beta,i])*(1-delta(i,j))-delta(alpha,p)*(delta(i,q)*delta(beta,j)+delta(j,q)*delta(beta,i))
-					J[n*p+q,n*alpha+beta] = 2.*tmp
-	print("Jacobian")
-	print(J)
-	return J
-	
-def Opti_Newton(A, c, eps, k_iter_max):
-	iterdata = iterations_data()
-	n = A.shape[1]
-	N = n**2
-	F = F_operator(A,c)
-	u_k = F(np.zeros((n,n)))[0].reshape((N), order = 'F')
-	st = time.time()
-	for k in range(k_iter_max):
-		print(f"Iteration {k}")
-		U_k = u_k.reshape((n,n), order ='F')
-		[F_U_k, U_kA] = F(U_k)
-		print("Calculating dFdu")
-		dFdu = dF_du(F_U_k, U_k, U_kA, A, c)
-		print("Calculating grad(f)")
-		grad = grad_f(F_U_k, A, dFdu, c)
-		print("performing Newton step")
-		u_kp1 = u_k - np.linalg.pinv(Jacobian(F_U_k,A, dFdu, c))@grad.reshape((N)) #Note: reshape without fortran-like order. because grad stored as [ df du_11 ... df du_1n ; df du_21 ... df_du_2n ; ... ] so row-wise reshape.
-		residual = np.linalg.norm(u_kp1-u_k, ord = 2)
-		iterdata(residual)
-		if residual < eps:
-			break
-		u_k = u_kp1
-	elapsed = time.time() - st
-	solutiondata = [iterdata.iterations, iterdata.residuals, elapsed]
-	return u_kp1, solutiondata
-
-#---
-
-#---MinRes---
-def MinRes(k_max, A, c, N, eps = 1e-13): # OUTDATED/rework to call in GMRES_m similar manner.
-	I = np.identity(N)
-	I_vec = I.reshape((N**2, 1), order = 'F')
-	st = time.time()
-	s = I_vec
-	residuals = []
-	iterations = []
-	
-	r = I_vec - G(s, A, c, N)
-	p = G(r, A, c, N)
-	
-	residual = np.linalg.norm(r, ord = 2)
-	residuals.append(residual)
-	iterations.append(0)
-	print(f"Iteration: {0}")
-	print(f"Residual: {residual}")
-	
-	for k in range(1,k_max):
-		a = (r.T@r)/(p.T@p)
-		s = s + a*r
-		r = r - a*p
-		p = G(r, A, c, N)
-		iterations.append(k)
-		#print(S)
-		residual = np.linalg.norm(r, ord = 2)
-		residuals.append(residual)
-		print(f"Iteration: {k}")
-		print(f"Residual: {residual}")
-		if (residual < eps):
-			break
-	et = time.time()
-	elapsed = et - st
-	print(f"Elapsed: {elapsed} s")
-	#plt.figure()
-	#plt.grid()
-	res_graph = plt.plot(iterations, residuals, color = 'red')
-	plt.yscale('log')
-	plt.xlabel(r'$Iterations$', fontsize = 12) 
-	plt.ylabel(r'$Local\quadresiduals$', fontsize = 12)
-	S = s.reshape((N,N), order = 'F')
-	return S
-#---
-'''

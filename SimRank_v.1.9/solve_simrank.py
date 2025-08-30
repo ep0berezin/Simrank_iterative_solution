@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import datetime as dt
 import pandas as pd
 from matplotlib.ticker import FixedLocator, FixedFormatter
-from memory_profiler import profile
 import solvers as slv
 import opti_solvers as optslv
 import rsvd_solver as rsvdslv
@@ -90,7 +89,7 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 	for solver in solvers:
 		if (solver == "SimpleIter"): #classis simple iter
 			notfound = False
-			print(f"Starting SimpleIter with {k_iter_max} iterations limit tau =  {tau} iter parameter ..")
+			print(f"Starting SimpleIter with {k_iter_max} iterations limit tau =  {tau} iter parameter ...")
 			G = G_operator(A_csr, c)
 			ts = time.time()
 			tau = 1.
@@ -103,7 +102,7 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 			t["S_si"] = ts
 		if (solver == "GMRES"):
 			notfound = False
-			print(f"Starting GMRES with {k_iter_max} iterations limit and {m_Krylov} max Krylov subspace dimensionality ..")
+			print(f"Starting GMRES with {k_iter_max} iterations limit and {m_Krylov} max Krylov subspace dimensionality ...")
 			G = G_operator(A_csr, c)
 			ts = time.time()
 			s_gmres, solutiondata = slv.GMRES_m(G, m_Krylov, np.zeros((n,n)).reshape((n**2,1), order = 'F'), I_vec, k_iter_max, acc)
@@ -114,7 +113,7 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 			t["S_gmres"] = ts
 		if (solver == "GMRES_scipy"): 
 			notfound = False
-			print(f"Starting GMRES from SciPy with {k_iter_max} iterations limit and {m_Krylov} max Krylov subspace dimensionality ..")
+			print(f"Starting GMRES from SciPy with {k_iter_max} iterations limit and {m_Krylov} max Krylov subspace dimensionality ...")
 			G = G_operator(A_csr, c)
 			ts = time.time()
 			s_gmres_scipy, solutiondata = slv.GMRES_scipy(G, m_Krylov, np.zeros((n,n)).reshape((n**2,1), order = 'F'), b, k_iter_max, acc)
@@ -125,10 +124,9 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 			t["S_gmres_scipy"] = ts
 		if (solver == "AltOpt"):
 			notfound = False
-			print(f"Starting oddsolver with {k_iter_max} iterations limit  ..")
+			print(f"Starting Alternating optimization solver with {k_iter_max} iterations limit  ...")
 			ts = time.time()
-			rank = 200
-			S_odd, solutiondata = slv.AltOpt(A, c, rank, slv.ALS, 100, 50, printout = True)
+			S_odd, solutiondata = slv.AltOpt(A, c, rank, slv.ALS, k_iter_max, dir_maxit=50, printout = True)
 			print(S_odd.shape)
 			ts = time.time() - ts
 			plot(solver, taskname, solutiondata, acc, c)
@@ -136,29 +134,28 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 			t["S_odd"] = ts
 		if (solver == "Optimization_Newton"):
 			notfound = False
-			print(f"Starting optimization Newton with {k_iter_max} iterations  ..")
+			print(f"Starting optimization using Newton solver with {k_iter_max} iterations limit ...")
 			#NOTE: best results are obtained if gmres_restarts=1 and m_Krylov 10...20 used.
 			#Increasing m_Krylov (and generally total amount of iterations, i.e. gmres_restarts*m_Krylov) over 20 leads to worse results.
 			ts = time.time()
-			rank = 200
-			S_opti_newton, solutiondata = optslv.Newton(A, c, rank, maxiter=100, gmres_restarts=1, m_Krylov=15, solver=optslv.GMRES_scipy)
+			S_opti_newton, solutiondata = optslv.Newton(A, c, rank, maxiter=k_iter_max, gmres_restarts=1, m_Krylov=m_Krylov, solver=optslv.GMRES_scipy, stagstop=1e-3)
 			ts = time.time() - ts
 			plot(solver, taskname, solutiondata, acc, c)
 			S["S_opti_newton"] = S_opti_newton
 			t["S_opti_newton"] = ts
 		if (solver == "RSVDIters"):
 			notfound = False
-			print(f"Starting RSVD Iters with {k_iter_max} iterations limit tau =  {tau} iter parameter ..")
+			print(f"Starting RSVD Iters with {k_iter_max} iterations ...")
 			ts = time.time()
-			r = 500
-			M_rsvd, solutiondata =  rsvdslv.RSVDIters(A, c, r, p, k_iter_max, acc*1e4) #1e-5 too slow.
+			p=8
+			M_rsvd, solutiondata =  rsvdslv.RSVDIters(A, c, rank, p, k_iter_max, acc*1e4) #1e-5 too slow.
 			ts = time.time() - ts
 			plot(solver, taskname, solutiondata, acc, c)
 			S["S_rsvd"] = M_rsvd + I
 			t["S_rsvd"] = ts
 		if (solver == "SimrankNX"): #test for simrank nx.
 			notfound = False
-			print(f"Starting SimpleIter NX with {k_iter_max} iterations limit  ..")
+			print(f"Starting SimpleIter NX with {k_iter_max} iterations limit  ...")
 			A_r = np.where(A_csr.toarray()>0, 1, 0)
 			print("Restored adjacency matrix A_r:")
 			print(A_r)
@@ -194,9 +191,9 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 	if len(S)>1:
 		err_Cheb, avg_err, err_Frob = err(S, n)
 		print(f"Err Frobenius = {err_Frob}")
-		print(f"Err Frobenius rel= {err_Frob/np.linalg.norm(np.load(f"data/S_etalon_{taskname}.npy"), ord = 'fro')}") ####!!!
-		print(f"Max err (Chebyshev) = {err_Cheb}")
-		print(f"Avg err ( sum(|S_1 - S_2|) / n*n) = {avg_err}")
+		print(f"Err Frobenius rel = {err_Frob/np.linalg.norm(np.load(f"data/S_etalon_{taskname}.npy"), ord = 'fro')}")
+		print(f"Err max (Chebyshev) = {err_Cheb}")
+		print(f"Err avg ( sum(|S_1 - S_2|) / n*n) = {avg_err}")
 		#writerrs(taskname, "RSVD", err_Frob, err_Cheb, r) 
 	for key in S: #iterating over solutions
 		print(key)
