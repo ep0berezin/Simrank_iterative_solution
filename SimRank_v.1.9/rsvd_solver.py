@@ -1,4 +1,18 @@
 import numpy as np
+import time
+
+class iterations_data:
+	def __init__(self):
+		self.iterations = []
+		self.residuals = []
+		self.k_iter = 0
+	def __call__(self, r, printout = True):
+		if printout: print(f"Iteration: {self.k_iter}")
+		self.k_iter+=1
+		self.iterations.append(self.k_iter)
+		self.residuals.append(r)
+		if printout: print('Current relative residual =', r)
+		return r
 
 class F_M_operator: #for RSVD iterations.
 	def __init__(self, A, c):
@@ -31,7 +45,7 @@ class F_M_operator: #for RSVD iterations.
 
 def RSVDIters(A, c, r, p, k_max_iter, eps): #RSVD iterations based on Oseledets article
 	n = A.shape[0]
-	iterdata = slv.iterations_data()
+	iterdata = iterations_data()
 	F_M = F_M_operator(A,c) #init operator
 	st = time.time()
 	M_0 = np.zeros((n,n))

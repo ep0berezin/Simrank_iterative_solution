@@ -138,7 +138,7 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 			#NOTE: best results are obtained if gmres_restarts=1 and m_Krylov 10...20 used.
 			#Increasing m_Krylov (and generally total amount of iterations, i.e. gmres_restarts*m_Krylov) over 20 leads to worse results.
 			ts = time.time()
-			S_opti_newton, solutiondata = optslv.Newton(A, c, rank, maxiter=k_iter_max, gmres_restarts=1, m_Krylov=m_Krylov, solver=optslv.GMRES_scipy, stagstop=1e-3)
+			S_opti_newton, solutiondata = optslv.Newton(A, c, rank, maxiter=k_iter_max, gmres_restarts=1, m_Krylov=m_Krylov, solver=optslv.GMRES_scipy, stagstop=1e-5)
 			ts = time.time() - ts
 			plot(solver, taskname, solutiondata, acc, c)
 			S["S_opti_newton"] = S_opti_newton

@@ -51,15 +51,16 @@ def LSq(beta, H):
 	e1 = np.zeros((m+1,1))
 	e1[0,0] = 1.0 #generating e1 vector
 	b = e1*beta
-	y = np.linalg.inv(H.T@H)@H.T@b
+	#y = np.linalg.inv(H.T@H)@H.T@b
+	y = np.linalg.pinv(H)@b
 	return y
 
 def Arnoldi(V_list, h_list, m_start, m_Krylov, LinOp, eps_zero = 1e-15, printout = False):
 	for j in range(m_start, m_Krylov):
 		#print(f"Building Arnoldi: V[:,{j}]")
-		v_j = V_list[j]
 		st_1 = time.time()
-		w_j = colvecto1dim(LinOp(v_j))
+		v_j = V_list[j]
+		w_j = LinOp(v_j).reshape(-1, order='F') #
 		if printout: print("Evaluate Av_j time:", time.time()-st_1)
 		Av_j_norm2 = np.linalg.norm(w_j, ord = 2)
 		st_2 = time.time()
@@ -73,12 +74,8 @@ def Arnoldi(V_list, h_list, m_start, m_Krylov, LinOp, eps_zero = 1e-15, printout
 		h_list[j+1][j] = w_j_norm2
 		if (w_j_norm2 <= eps_zero):
 			return j
-		V_list[j+1] = (w_j/w_j_norm2)
+		V_list[j+1] = w_j*(1/w_j_norm2)
 	return m_Krylov
-
-def colvecto1dim(u):
-	tmp = u
-	return tmp.reshape(tmp.shape[0], order = 'F')
 
 def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13, printout = False):
 	N = x_0.shape[0] #N = n^2
@@ -98,7 +95,7 @@ def GMRES_m(LinOp, m_Krylov, x_0, b, k_max, eps = 1e-13, printout = False):
 		r_norm2 = np.linalg.norm(r, ord = 2)
 		beta = r_norm2
 		V_list = [np.zeros(N)] #Stores columns of V matrix
-		V_list[0] = colvecto1dim(r)/beta
+		V_list[0] = r.reshape(-1, order='F')/beta
 		H_list = [np.zeros(m_Krylov)] #Stores rows of Hessenberg matrix
 		
 		for m in range(1,m_Krylov+1):

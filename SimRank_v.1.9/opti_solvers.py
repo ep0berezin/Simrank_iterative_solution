@@ -103,7 +103,7 @@ def Newton(A, c, r, maxiter, gmres_restarts, m_Krylov, solver, stagstop = 1e-5, 
 	st = time.time()
 	for k in range(maxiter):
 		dgradf_vec = lambda X : sops.dgradf_vectorized(U, X)
-		U = U - inverse_matvec(dgradf_vec, sops.gradf(U), m_Krylov, gmres_restarts, solver, printout=False).reshape((n,r), order = 'F')
+		U -= inverse_matvec(dgradf_vec, sops.gradf(U), m_Krylov, gmres_restarts, solver, printout=False).reshape((n,r), order = 'F')
 		f_val = sops.f(U@U.T)
 		iterdata(f_val)
 		if (np.abs(f_val - f_val_prev)) < stagstop:
