@@ -18,7 +18,7 @@ def IsIn(j, M): #j = '12', nbs = '112 123'
 			res = 1
 	return res
 
-def GetMatrixMetro(path = "data/metro_stations.csv" ):
+def GetMatrixMetro(path, showfig):
 	N = 303
 	data = pd.read_csv(path)
 	M_ind = data['Station_index']
@@ -43,9 +43,10 @@ def GetMatrixMetro(path = "data/metro_stations.csv" ):
 	
 	print("Trace-check after nullifiyng:")
 	print(np.trace(G))
-	plt.figure()
-	plt.imshow(G, cmap = 'binary')
-	plt.show()
+	if showfig:
+		plt.figure()
+		plt.imshow(G, cmap = 'binary')
+		plt.show()
 	return G
 
 def norm1_ColumnNormalize(M): #may be optimized! L1 col norms can be easily obtained by sum(A).
@@ -58,6 +59,6 @@ def norm1_ColumnNormalize(M): #may be optimized! L1 col norms can be easily obta
 	print (normalized)
 	return normalized
 
-def ObtainMatrix():
-	A = norm1_ColumnNormalize(GetMatrixMetro())
+def ObtainMatrix(path="data/metro_stations.csv", showfig=0):
+	A = norm1_ColumnNormalize(GetMatrixMetro(path=path, showfig=showfig))
 	return A

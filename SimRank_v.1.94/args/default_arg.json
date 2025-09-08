@@ -5,5 +5,7 @@
 	"k_iter_max": 100,
 	"taskname": "metro",
 	"c": 0.8,
-	"solvers":["Optimization_Newton", "Compare"]
+	"solvers":["Optimization_Newton","Compare"],
+	"optimize" : false,
+	"showfig" : true
 }

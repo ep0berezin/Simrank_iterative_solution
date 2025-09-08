@@ -8,19 +8,25 @@ import matplotlib.pyplot as plt
 from memory_profiler import profile
 
 #WARNING: GetMatrix only for non-directed graphs.
-def GetMatrixFb(path = "data/facebook_combined.txt", delimeter = ' '):
-	n = 4039
+def GetMatrix(path, showfig, delimeter = ' '):
+	n = 1005
 	A = np.zeros((n,n))
+	#data = pd.read_csv(path, delimeter = ',')
+
 	file = open(path,'r')
 	for line in file:
 		string = file.readline().split(delimeter)
-		node1, node2 = int(string[0]), int(string[1])
-		A[node1,node2] = 1
-	A = (A+A.T) #Omit this for directed graphs!
-	plt.figure()
-	plt.imshow(A, cmap = 'binary')
-	plt.show()
-	print("Edges: ", sum(sum(A)))
+		if (string[0]!=""):
+			#print(string)
+			node1, node2 = int(string[0].strip()), int(string[1].strip())
+			if (node1!=node2):
+				A[node1,node2] = 1.0
+	#A = (A+A.T) #Omit this for directed graphs!
+	#print("Edges: ", sum(sum(A)))
+	if showfig:
+		plt.figure()
+		plt.imshow(A, cmap = 'binary')
+		plt.show()
 	return A
 
 def norm1_ColumnNormalize(M): #may be optimized! L1 col norms can be easily obtained by sum(A).
@@ -33,6 +39,6 @@ def norm1_ColumnNormalize(M): #may be optimized! L1 col norms can be easily obta
 	print (normalized)
 	return normalized
 
-def ObtainMatrix():
-	A = norm1_ColumnNormalize(GetMatrixFb())
+def ObtainMatrix(path = "data/email-Eu-core.txt", showfig=0):
+	A = norm1_ColumnNormalize(GetMatrix(path=path, showfig=showfig))
 	return A

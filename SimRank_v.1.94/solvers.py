@@ -257,7 +257,7 @@ def AltOpt(A, c, r, solver, maxiter=100, dir_maxit=100, eps_fro = 1e-15, eps_che
 		if printout: print(f"Alternating optimization iteration {k}")
 		V_prev = V
 		U_prev = U
-		U, V = solver(U, V, A, c, dir_maxit, True)
+		U, V = solver(U, V, A, c, dir_maxit, False)
 		diff =U@V.T - U_prev@V_prev.T
 		err_fro = (np.linalg.norm(diff, ord = 'fro'))
 		iterdata(err_fro)

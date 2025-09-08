@@ -11,6 +11,8 @@ import opti_solvers as optslv
 import rsvd_solver as rsvdslv
 import networkx as nx
 
+dateformat = "%Y_%m_%d-%H-%M-%S" #for log and plots saving
+
 class G_operator:
 	def __init__(self, A, c):
 		self.A = A
@@ -26,78 +28,32 @@ class G_operator:
 		G = G.reshape((self.n**2,1), order = 'F')
 		return G
 
-def plot(solvername, taskname, solutiondata, acc, c, wtf=True):
-	dateformat = "%Y_%m_%d-%H-%M-%S" #for log and plots saving
-	res_graph = plt.plot(solutiondata[0], solutiondata[1])
-	plt.yscale('log')
-	plt.xlabel(r'Итерация', fontsize = 12) 
-	plt.ylabel(r'Относительная невязка', fontsize = 12)
-	
-	if wtf:
-		df = pd.DataFrame({'residuals': solutiondata[1], 'iterations': solutiondata[0]})
-		df.to_csv("results/data/results_"+solvername+"_"+taskname+"_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat))+".csv", index=False)
-
-def writelog(c, taskname, t, acc, dateformat):
-	filename = ("results/log/log_"+taskname+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".csv")
-	with open(filename, 'a+') as f:
-		f.write(f"{c},{taskname},")
-		for key in t:
-			f.write(f"{key},{t[key]},")
-
-def writerrs(taskname, solver, err_fro, err_cheb, rank):
-	filename = ("results/log_"+solver+"_"+taskname+".csv")
-	with open(filename, 'a+') as f:
-		f.write(f"{taskname},{rank},{err_cheb},{err_fro},\n")
-
-def err(S, n): #S - dict of solutions ###rework to make output like : d = {"gmres-gmres_svd" : [max_err, avg_err, fro_err]}
-	max_err = 0.0
-	err_tmp = 0.0
-	err_sum = 0.0
-	for key1 in S:
-		for key2 in S:
-			if (key1!=key2):
-
-				plt.figure()
-				graph_err = plt.imshow(np.abs(S[key1]-S[key2])) #errors portrait
-				cbar = plt.colorbar()
-				cbar.set_label("abs error")
-				plt.title(f"Портрет ошибки {str(key1)} - {str(key2)}", fontweight = "bold")
-				err_tmp = np.max(np.abs(S[key1]-S[key2]))
-				err_sum += np.sum(np.abs(S[key1]-S[key2]))
-				err_frob = np.linalg.norm((S[key1] - S[key2]), ord = 'fro')
-			if (err_tmp > max_err):
-				max_err = err_tmp
-	return max_err, err_sum/(n*n), err_frob
-
-def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = list of flags: ['SimpleIter, GMRES, MinRes'] (in any order)
-	dateformat = "%Y_%m_%d-%H-%M-%S" #for log and plots saving
-	n = A.shape[0]
+def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers, optimize, showfig): #solvers = list of flags: ['SimpleIter, GMRES, MinRes'] (in any order)
 	if (A.shape[0]!=A.shape[1]):
 		print("Non-square matrix passed in argument. Stopped.")
 		return 1
-	I = np.eye(n) #identity matrix of required dimensions
-	I_vec = np.eye(n).reshape((n**2,1), order = 'F')
 	print("Adjacency matrix:")
 	print(A)
-	A_csr = csr_matrix(A) #if A is already CSR -> changes nothing.
 	
+	n = A.shape[0]
+	I = np.eye(n)
+	I_vec = np.eye(n).reshape((n**2,1), order = 'F')
+	np.fill_diagonal(A, 1e-15) #epsilons in diag to avoid sparsity changes in A_csr
+	A_csr = csr_matrix(A)
 	S = {} #init dict of solutions
 	t = {} #init time dict
 	notfound = True
-	plt.figure()
-	plt.grid()
 	for solver in solvers:
 		if (solver == "SimpleIter"): #classis simple iter
 			notfound = False
+			tau = 1.
 			print(f"Starting SimpleIter with {k_iter_max} iterations limit tau =  {tau} iter parameter ...")
 			G = G_operator(A_csr, c)
 			ts = time.time()
-			tau = 1.
-			s_si, solutiondata = slv.SimpleIter(G, tau, np.zeros((n,n)).reshape((n**2,1), order = 'F'), I_vec, k_iter_max, False, acc)
+			s_si, solutiondata = slv.SimpleIter(G, tau, np.zeros((n,n)).reshape((n**2,1), order = 'F'), I_vec, k_iter_max, True, acc)
 			ts = time.time() - ts
 			S_si = s_si.reshape((n,n), order = 'F')
-			#np.save(f"S_etalon_{taskname}.npy", S_si)
-			plot(solver, taskname, solutiondata, acc, c)
+			np.save(f"S_etalon_{taskname}.npy", S_si)
 			S["S_si"] = S_si
 			t["S_si"] = ts
 		if (solver == "GMRES"):
@@ -108,7 +64,6 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 			s_gmres, solutiondata = slv.GMRES_m(G, m_Krylov, np.zeros((n,n)).reshape((n**2,1), order = 'F'), I_vec, k_iter_max, acc)
 			ts = time.time() - ts
 			S_gmres = s_gmres.reshape((n,n), order = 'F')
-			plot(solver, taskname, solutiondata, acc, c)
 			S["S_gmres"] = S_gmres
 			t["S_gmres"] = ts
 		if (solver == "GMRES_scipy"): 
@@ -119,38 +74,34 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 			s_gmres_scipy, solutiondata = slv.GMRES_scipy(G, m_Krylov, np.zeros((n,n)).reshape((n**2,1), order = 'F'), b, k_iter_max, acc)
 			S_gmres_scipy = s_gmres_scipy.reshape((n,n), order = 'F')
 			ts = time.time() - ts
-			plot(solver, taskname, solutiondata, acc, c)
 			S["S_gmres_scipy"] = S_gmres_scipy
 			t["S_gmres_scipy"] = ts
 		if (solver == "AltOpt"):
 			notfound = False
-			print(f"Starting Alternating optimization solver with {k_iter_max} iterations limit  ...")
+			print(f"Starting Alternating optimization solver with rank={rank}, iterations limit {k_iter_max}  ...")
 			ts = time.time()
 			S_odd, solutiondata = slv.AltOpt(A, c, rank, slv.ALS, k_iter_max, dir_maxit=50, printout = True)
 			print(S_odd.shape)
 			ts = time.time() - ts
-			plot(solver, taskname, solutiondata, acc, c)
 			S["S_odd"] = S_odd
 			t["S_odd"] = ts
 		if (solver == "Optimization_Newton"):
 			notfound = False
-			print(f"Starting optimization using Newton solver with {k_iter_max} iterations limit ...")
+			print(f"Starting optimization using Newton solver with rank={rank}, iterations limit {k_iter_max} ...")
 			#NOTE: best results are obtained if gmres_restarts=1 and m_Krylov 10...20 used.
 			#Increasing m_Krylov (and generally total amount of iterations, i.e. gmres_restarts*m_Krylov) over 20 leads to worse results.
 			ts = time.time()
-			S_opti_newton, solutiondata = optslv.Newton(A, c, rank, maxiter=k_iter_max, gmres_restarts=1, m_Krylov=m_Krylov, solver=optslv.GMRES_scipy, stagstop=1e-5)
+			S_opti_newton, solutiondata = optslv.Newton(A_csr, c, rank, maxiter=k_iter_max, gmres_restarts=1, m_Krylov=m_Krylov, solver=optslv.GMRES_scipy, stagstop=1e-5, optimize=optimize)
 			ts = time.time() - ts
-			plot(solver, taskname, solutiondata, acc, c)
 			S["S_opti_newton"] = S_opti_newton
 			t["S_opti_newton"] = ts
 		if (solver == "RSVDIters"):
 			notfound = False
-			print(f"Starting RSVD Iters with {k_iter_max} iterations ...")
+			print(f"Starting RSVD Iters with rank={rank}, iterations limit {k_iter_max} ...")
 			ts = time.time()
 			p=8
 			M_rsvd, solutiondata =  rsvdslv.RSVDIters(A, c, rank, p, k_iter_max, acc*1e4) #1e-5 too slow.
 			ts = time.time() - ts
-			plot(solver, taskname, solutiondata, acc, c)
 			S["S_rsvd"] = M_rsvd + I
 			t["S_rsvd"] = ts
 		if (solver == "SimrankNX"): #test for simrank nx.
@@ -185,17 +136,56 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 		if notfound:
 			print("Solver not found.")
 			return 1
-	plt.savefig("results/img/vis_"+taskname+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
-	writelog(c, taskname, t, acc, dateformat)
+	writelog(c, taskname, t, acc)
 	thresholds = [0.2, 0.5]
 	if len(S)>1:
-		err_Cheb, avg_err, err_Frob = err(S, n)
+		err_Cheb, avg_err, err_Frob = err(S, n, showfig)
 		print(f"Err Frobenius = {err_Frob}")
 		print(f"Err Frobenius rel = {err_Frob/np.linalg.norm(np.load(f"data/S_etalon_{taskname}.npy"), ord = 'fro')}")
 		print(f"Err max (Chebyshev) = {err_Cheb}")
 		print(f"Err avg ( sum(|S_1 - S_2|) / n*n) = {avg_err}")
 		#writerrs(taskname, "RSVD", err_Frob, err_Cheb, r) 
+	if showfig:
+		plt.figure()
+		plt.grid() 
+		showresults(S, t, taskname, solutiondata, thresholds, c, acc, n)
+		plt.show()
+	return S, err_Frob, err_Cheb
+
+def err(S, n, showfig): #S - dict of solutions ###rework to make output like : d = {"gmres-gmres_svd" : [max_err, avg_err, fro_err]}
+	max_err = 0.0
+	err_tmp = 0.0
+	err_sum = 0.0
+	for key1 in S:
+		for key2 in S:
+			if (key1!=key2):
+				if showfig:
+					plt.figure()
+					graph_err = plt.imshow(np.abs(S[key1]-S[key2])) #errors portrait
+					cbar = plt.colorbar()
+					cbar.set_label("abs error")
+					plt.title(f"Портрет ошибки {str(key1)} - {str(key2)}", fontweight = "bold")
+				err_tmp = np.max(np.abs(S[key1]-S[key2]))
+				err_sum += np.sum(np.abs(S[key1]-S[key2]))
+				err_frob = np.linalg.norm((S[key1] - S[key2]), ord = 'fro')
+			if (err_tmp > max_err):
+				max_err = err_tmp
+	return max_err, err_sum/(n*n), err_frob
+
+def plot_residuals(solvername, taskname, solutiondata, acc, c, wtf=True):
+	res_graph = plt.plot(solutiondata[0], solutiondata[1])
+	plt.yscale('log')
+	plt.xlabel(r'Итерация', fontsize = 12) 
+	plt.ylabel(r'Относительная невязка', fontsize = 12)
+	plt.savefig("results/img/vis_"+taskname+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
+	if wtf:
+		df = pd.DataFrame({'residuals': solutiondata[1], 'iterations': solutiondata[0]})
+		df.to_csv("results/data/results_"+solvername+"_"+taskname+"_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat))+".csv", index=False)
+
+def showresults(S, t, taskname, solutiondata, thresholds, c, acc, n):
+	I = np.eye(n)
 	for key in S: #iterating over solutions
+		plot_residuals(key, taskname, solutiondata, acc, c, dateformat)
 		print(key)
 		print(S[key])
 		print(f"Time of {key}: ", t[key])
@@ -206,7 +196,6 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 		plt.title(taskname)
 		plt.title(f"Матрица S, логарифмическая шкала, метод: {str(key)}", fontweight = "bold")
 		plt.savefig("results/img/imshow_ln_"+taskname+"_"+str(key)+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
-		
 		plt.figure()
 		graph = plt.imshow(S[key]-I)
 		cbar = plt.colorbar()
@@ -226,7 +215,17 @@ def Solve(acc, m_Krylov, rank, k_iter_max, taskname, A, c, solvers): #solvers = 
 			plt.title(taskname)
 			plt.title(f"Матрица S, метод: {str(key)}, порог: {str(trs)}", fontweight = "bold")
 			plt.savefig("results/img/imshow_top_"+str(trs)+"_"+taskname+"_"+str(key)+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".png")
-	plt.show()
-	return S
+
+def writelog(c, taskname, t, acc):
+	filename = ("results/log/log_"+taskname+"_eps_"+str(acc)+"_c_"+str(c)+"_"+str(dt.datetime.now().strftime(dateformat) )+".csv")
+	with open(filename, 'a+') as f:
+		f.write(f"{c},{taskname},")
+		for key in t:
+			f.write(f"{key},{t[key]},")
+
+def writerrs(taskname, solver, err_fro, err_cheb, rank):
+	filename = ("results/log_"+solver+"_"+taskname+".csv")
+	with open(filename, 'a+') as f:
+		f.write(f"{taskname},{rank},{err_cheb},{err_fro},\n")
 
 
